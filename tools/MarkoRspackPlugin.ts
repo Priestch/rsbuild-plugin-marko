@@ -1,34 +1,27 @@
-import path from 'node:path';
-import type { Configuration } from '@rspack/core';
+import { fileURLToPath } from 'node:url';
 
-import type { Compiler as CompilerType } from '@rspack/core';
-// import compilerPkg from '@rspack/core'
-// const {Compiler} = compilerPkg;
-
-import type { Compilation as CompilationType } from '@rspack/core';
-
+import type { RsbuildPluginAPI } from '@rsbuild/core';
 import { sources } from '@rspack/core';
-
-import type { RsbuildPlugin } from '@rsbuild/core';
+import type {
+  Compilation as CompilationType,
+  Compiler as CompilerType,
+  Configuration,
+} from '@rspack/core';
 import moduleName from '../helpers/module-name';
 
 interface ResolvablePromise<T> extends Promise<T> {
   resolve(value: T): void;
 }
 
+interface ResourceModule {
+  resource?: string;
+}
+
 declare module '@rspack/core' {
   interface Compiler {
-    // @ts-ignore
-    watchMode?: boolean;
     watching?: Compiler['watching'];
-    markoPluginOptions?: MarkoRspackPlugin['options'] & {
-      markoCompileCache?: Map<unknown, unknown>;
-      markoVirtualSources?: Map<string, { code: string | Buffer; map?: any }>;
-    };
     markoAssetsPending?: ResolvablePromise<void>;
-    markoAssetsRead?: boolean;
     markoEntriesPending?: ResolvablePromise<void>;
-    markoEntriesRead?: boolean;
   }
 }
 
@@ -38,29 +31,18 @@ export interface MarkoPluginOptions {
 }
 
 export default class MarkoRspackPlugin {
-  private options: MarkoPluginOptions & {
-    markoCompileCache: Map<unknown, unknown>;
-    markoVirtualSources: Map<string, { code: string | Buffer; map?: any }>;
-  };
+  private options: MarkoPluginOptions;
   private serverCompiler: CompilerType | null = null;
   private browserCompilers: CompilerType[] = [];
-  private clientEntries: { [x: string]: string } = {};
-  private clientAssets: {
-    [buildName: string]: {
-      [entryName: string]: { [assetType: string]: string[] };
-    };
-  } = {};
-  private rsbuildApi: RsbuildPlugin['setup'] extends (api: infer T) => any
-    ? T
-    : never;
+  private clientEntries: Record<string, string> = {};
+  private clientAssets: Record<
+    string,
+    Record<string, Record<string, string[]>>
+  > = {};
+  private rsbuildApi: RsbuildPluginAPI | null = null;
 
   constructor(options: MarkoPluginOptions = {}) {
-    this.rsbuildApi = {} as any;
-    this.options = {
-      ...options,
-      markoCompileCache: new Map(),
-      markoVirtualSources: new Map(),
-    };
+    this.options = { ...options };
 
     if (this.options.runtimeId) {
       this.options.runtimeId = this.normalizeRuntimeId(this.options.runtimeId);
@@ -71,48 +53,45 @@ export default class MarkoRspackPlugin {
     this.browserCompilers.push(compiler);
     this.applyBrowser(compiler);
     this.setupRules(compiler);
-    // Ensure entry points are properly set
-    // @ts-ignore
     compiler.options.entry = this.getEntryPoints(compiler);
   }
+
   serverApply(compiler: CompilerType) {
     this.serverCompiler = compiler;
     this.applyServer(compiler);
     this.setupRules(compiler);
-    // Ensure entry points are properly set
-    // @ts-ignore
     compiler.options.entry = this.getEntryPoints(compiler);
   }
 
-  setup(api: RsbuildPlugin['setup'] extends (api: infer T) => any ? T : never) {
+  setup(api: RsbuildPluginAPI) {
     this.rsbuildApi = api;
   }
 
   private getEntryPoints(compiler: CompilerType): Configuration['entry'] {
+    if (!this.rsbuildApi) {
+      throw new Error('Rsbuild API not initialized');
+    }
+
     const rsbuildConfig = this.rsbuildApi.getRsbuildConfig();
     const environments = rsbuildConfig.environments || {};
     const source = rsbuildConfig.source || {};
 
     if (environments.node && environments.web) {
-      // Multi-environment (SSR) scenario
       if (compiler.options.target === 'node') {
-        // @ts-ignore
         return environments.node.source.entry || {};
       }
-      // @ts-ignore
+
       return environments.web.source.entry || {};
     }
+
     if (environments.node) {
-      // Node-only environment
-      // @ts-ignore
       return environments.node.source.entry || {};
     }
+
     if (environments.web) {
-      // Web-only environment
-      // @ts-ignore
       return environments.web.source.entry || {};
     }
-    // Single-target scenario
+
     return source.entry || {};
   }
 
@@ -120,10 +99,12 @@ export default class MarkoRspackPlugin {
     const target = compiler.options.target;
     const isBrowser =
       target === 'web' || (Array.isArray(target) && target.includes('web'));
-    const loaderPath = path.resolve(
-      process.cwd(),
-      'node_modules/rsbuild-plugin-marko/dist/marko-loader.js',
+    const loaderPath = fileURLToPath(
+      new URL('../dist/marko-loader.js', import.meta.url),
     );
+
+    compiler.options.module = compiler.options.module || { rules: [] };
+    compiler.options.module.rules = compiler.options.module.rules || [];
 
     compiler.options.module.rules.push(
       {
@@ -165,32 +146,14 @@ export default class MarkoRspackPlugin {
         ],
       },
       {
-        test: /\.(jpg|jpeg|gif|png|svg|)$/,
+        test: /\.(jpg|jpeg|gif|png|svg)$/,
         type: 'asset',
-      },
-      {
-        test: /\.(marko|js|mjs|ts)$/,
-        type: 'javascript/auto',
-        use: (info) => {
-          const loaders = [];
-
-          // @ts-ignore
-          if (info.resource.endsWith('.ts')) {
-            loaders.push({
-              loader: 'ts-loader',
-              options: {
-                transpileOnly: true,
-              },
-            });
-          }
-          return loaders;
-        },
       },
     );
   }
 
   private applyServer(compiler: CompilerType) {
-    (compiler as any).markoEntriesPending = this.createDeferredPromise<void>();
+    compiler.markoEntriesPending = this.createDeferredPromise<void>();
     this.serverCompiler = compiler;
 
     compiler.hooks.thisCompilation.tap(
@@ -204,21 +167,23 @@ export default class MarkoRspackPlugin {
 
         compilation.hooks.finishModules.tap(
           'MarkoRspackServer:finishModules',
-          (modules: any) => {
+          (modules: Iterable<ResourceModule>) => {
             let hasChangedEntries = false;
             const removedEntryIds = new Set(Object.keys(this.clientEntries));
 
             for (const mod of modules) {
-              const resource = (mod as any).resource;
-              if (resource?.endsWith('.marko?server-entry')) {
-                const filename = resource.replace(/\?server-entry$/, '');
-                const entryTemplateId = moduleName(filename);
+              const resource = mod.resource;
+              if (!resource?.endsWith('.marko?server-entry')) {
+                continue;
+              }
 
-                if (!removedEntryIds.delete(entryTemplateId)) {
-                  hasChangedEntries = true;
-                  this.clientEntries[entryTemplateId] =
-                    `${filename}?browser-entry`;
-                }
+              const filename = resource.replace(/\?server-entry$/, '');
+              const entryTemplateId = moduleName(filename);
+
+              if (!removedEntryIds.delete(entryTemplateId)) {
+                hasChangedEntries = true;
+                this.clientEntries[entryTemplateId] =
+                  `${filename}?browser-entry`;
               }
             }
 
@@ -244,25 +209,34 @@ export default class MarkoRspackPlugin {
             stage: -100,
           },
           async () => {
-            await Promise.all(
-              this.browserCompilers.map((it) => (it as any).markoAssetsPending),
-            );
+            try {
+              await Promise.all(
+                this.browserCompilers.map(
+                  (browserCompiler) => browserCompiler.markoAssetsPending,
+                ),
+              );
 
-            const clientAssets = this.sortKeys(this.clientAssets);
+              const clientAssets = this.sortKeys(this.clientAssets);
+              let placeholderFound = false;
 
-            for (const chunk of compilation.chunks) {
-              if (!chunk.canBeInitial()) {
-                continue;
-              }
+              for (const chunk of compilation.chunks) {
+                if (!chunk.canBeInitial()) {
+                  continue;
+                }
 
-              for (const file of chunk.files) {
-                compilation.updateAsset(file, (old: sources.Source) => {
-                  const placeholder = 'MARKO_MANIFEST_PLACEHOLDER';
-                  const placeholderPosition = old
-                    .source()
-                    .toString()
-                    .indexOf(placeholder);
-                  if (placeholderPosition > -1) {
+                for (const file of chunk.files) {
+                  compilation.updateAsset(file, (old: sources.Source) => {
+                    const placeholder = 'MARKO_MANIFEST_PLACEHOLDER';
+                    const placeholderPosition = old
+                      .source()
+                      .toString()
+                      .indexOf(placeholder);
+
+                    if (placeholderPosition < 0) {
+                      return old;
+                    }
+
+                    placeholderFound = true;
                     const hasMultipleBuilds = this.browserCompilers.length > 1;
                     const defaultBuild =
                       this.browserCompilers.length > 0 &&
@@ -296,13 +270,21 @@ export default class MarkoRspackPlugin {
                     );
 
                     return newSource;
-                  }
-
-                  return old;
-                });
+                  });
+                }
               }
+
+              if (
+                Object.keys(this.clientEntries).length > 0 &&
+                !placeholderFound
+              ) {
+                throw new Error(
+                  'Unable to inject the Marko manifest because the server bundle did not contain MARKO_MANIFEST_PLACEHOLDER.',
+                );
+              }
+            } finally {
+              compiler.markoEntriesPending?.resolve();
             }
-            (this.serverCompiler as any).markoEntriesPending.resolve();
           },
         );
       },
@@ -312,15 +294,15 @@ export default class MarkoRspackPlugin {
   private applyBrowser(compiler: CompilerType) {
     const compilerName = compiler.options.name || 'default';
     const entryOption = compiler.options.entry;
-    this.browserCompilers.push(compiler);
 
     compiler.options.entry = async () => {
       if (!this.serverCompiler) {
         throw new Error('Server compiler not initialized');
       }
-      await (this.serverCompiler as any).markoEntriesPending;
 
-      const normalizedEntries: any = {};
+      await this.serverCompiler.markoEntriesPending;
+
+      const normalizedEntries: Record<string, { import: string[] }> = {};
       for (const key in this.clientEntries) {
         normalizedEntries[key] = {
           import: [this.clientEntries[key]],
@@ -331,9 +313,11 @@ export default class MarkoRspackPlugin {
         const currentEntry = await entryOption();
         return { ...currentEntry, ...normalizedEntries };
       }
+
       if (typeof entryOption === 'object' && !Array.isArray(entryOption)) {
         return { ...entryOption, ...normalizedEntries };
       }
+
       return normalizedEntries;
     };
 
@@ -341,43 +325,43 @@ export default class MarkoRspackPlugin {
       'MarkoRspackBrowser',
       (compilation: CompilationType) => {
         const pendingAssets = this.createDeferredPromise<void>();
-        (compiler as any).markoAssetsPending = pendingAssets;
+        compiler.markoAssetsPending = pendingAssets;
 
         compilation.hooks.afterProcessAssets.tap(
           'MarkoRspackBrowser:afterProcessAssets',
           () => {
             for (const [entryName, entrypoint] of compilation.entrypoints) {
-              const assetsByType: { [x: string]: string[] } = {};
+              const assetsByType: Record<string, string[]> = {};
 
               for (const chunk of entrypoint.chunks) {
                 for (const file of chunk.files) {
                   const asset = compilation.getAsset(file);
-                  if (asset) {
-                    const source = asset.source;
-                    if (
-                      source instanceof sources.RawSource &&
-                      source.buffer().length === 0
-                    ) {
-                      compilation.deleteAsset(file);
-                      continue;
-                    }
-                    const ext = file.split('.').pop() || '';
-                    const type = (assetsByType[ext] = assetsByType[ext] || []);
-                    type.push(file);
+                  if (!asset) {
+                    continue;
                   }
+
+                  const source = asset.source;
+                  if (
+                    source instanceof sources.RawSource &&
+                    source.buffer().length === 0
+                  ) {
+                    compilation.deleteAsset(file);
+                    continue;
+                  }
+
+                  const ext = file.split('.').pop() || '';
+                  const type = assetsByType[ext] || [];
+                  assetsByType[ext] = type;
+                  type.push(file);
                 }
               }
 
-              const buildAssets = (this.clientAssets[compilerName] =
-                this.clientAssets[compilerName] || {});
+              const buildAssets = this.clientAssets[compilerName] || {};
+              this.clientAssets[compilerName] = buildAssets;
               buildAssets[entryName] = assetsByType;
             }
-            // console.log('Client assets:', this.clientAssets);
 
-            if (
-              this.serverCompiler &&
-              (this.serverCompiler as any).markoAssetsRead
-            ) {
+            if (this.serverCompiler) {
               this.serverCompiler.watching?.invalidate();
             }
 
@@ -403,18 +387,22 @@ export default class MarkoRspackPlugin {
     return promise;
   }
 
-  private sortKeys(obj: any): any {
+  private sortKeys<T>(obj: T): T {
     if (typeof obj !== 'object' || obj === null) {
       return obj;
     }
+
     if (Array.isArray(obj)) {
-      return obj.map(this.sortKeys.bind(this));
+      return obj.map((item) => this.sortKeys(item)) as T;
     }
-    return Object.keys(obj)
-      .sort()
-      .reduce((result: any, key) => {
-        result[key] = this.sortKeys(obj[key]);
-        return result;
-      }, {});
+
+    const entries = obj as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+
+    for (const key of Object.keys(entries).sort()) {
+      result[key] = this.sortKeys(entries[key]);
+    }
+
+    return result as T;
   }
 }

@@ -7,14 +7,14 @@ interface MarkoLoaderOptions {
   translator?: string;
   modules?: 'esm' | 'cjs';
   output?: 'html' | 'dom' | 'hydrate';
-  babelConfig?: any;
+  babelConfig?: Record<string, unknown>;
   virtualFiles?: boolean;
   sourceMaps?: boolean;
 }
 
 export default function markoLoader(
   this: LoaderContext<MarkoLoaderOptions>,
-  source: string,
+  _source: string,
 ): void {
   const callback = this.async();
   const options = this.getOptions() || {};
@@ -33,7 +33,8 @@ export default function markoLoader(
       fileSystem: fs,
     })
     .then((result) => {
-      callback(null, result.code, result.map as any);
+      const map = result.map as Parameters<typeof callback>[2];
+      callback(null, result.code, map);
     })
     .catch((err) => {
       callback(err as Error);

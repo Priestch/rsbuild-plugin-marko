@@ -4,6 +4,7 @@ import MarkoRspackPlugin, {
 } from '../tools/MarkoRspackPlugin';
 
 const PLUGIN_MARKO_NAME = 'rsbuild:marko';
+
 const pluginMarko = (options: MarkoPluginOptions = {}) => {
   const markoRspackPlugin = new MarkoRspackPlugin(options);
 
@@ -12,67 +13,54 @@ const pluginMarko = (options: MarkoPluginOptions = {}) => {
     setup: (api: RsbuildPluginAPI) => {
       markoRspackPlugin.setup(api);
 
-      // let pluginLoaded = false;
-      const serverApplied = false;
+      let serverApplied = false;
       let browserApplied = false;
 
       api.modifyRspackConfig((config, { target }) => {
         config.plugins = config.plugins || [];
 
-        const targets = ['node', 'web'];
+        const applyServerPlugin = () => {
+          if (serverApplied) {
+            return;
+          }
 
-        if (target) {
-          // If a specific target is set
-          if (target === 'node' && !serverApplied) {
-            console.log('Applying MarkoRspackServerPlugin for node target');
-            // @ts-ignore
-            config.plugins.push({
-              name: 'MarkoRspackServerPlugin',
-              // @ts-ignore
-              apply(compiler) {
-                markoRspackPlugin.serverApply(compiler);
-              },
-            });
-          } else if (target === 'web' && !browserApplied) {
-            console.log('Applying MarkoRspackBrowserPlugin for web target');
-            // @ts-ignore
-            config.plugins.push({
-              name: 'MarkoRspackBrowserPlugin',
-              // @ts-ignore
-              apply(compiler) {
-                markoRspackPlugin.browserApply(compiler);
-              },
-            });
-            browserApplied = true;
+          console.log('Applying MarkoRspackServerPlugin for node target');
+          config.plugins.push({
+            name: 'MarkoRspackServerPlugin',
+            apply(compiler) {
+              markoRspackPlugin.serverApply(compiler);
+            },
+          });
+          serverApplied = true;
+        };
+
+        const applyBrowserPlugin = () => {
+          if (browserApplied) {
+            return;
           }
+
+          console.log('Applying MarkoRspackBrowserPlugin for web target');
+          config.plugins.push({
+            name: 'MarkoRspackBrowserPlugin',
+            apply(compiler) {
+              markoRspackPlugin.browserApply(compiler);
+            },
+          });
+          browserApplied = true;
+        };
+
+        if (target === 'node') {
+          applyServerPlugin();
+        } else if (target === 'web') {
+          applyBrowserPlugin();
         } else {
-          // If no specific target is set, apply for both
-          for (const currentTarget of targets) {
-            if (currentTarget === 'node' && !serverApplied) {
-              console.log('Applying MarkoRspackServerPlugin for node target');
-              config.plugins.push({
-                name: 'MarkoRspackServerPlugin',
-                // @ts-ignore
-                apply(compiler) {
-                  markoRspackPlugin.serverApply(compiler);
-                },
-              });
-            } else if (currentTarget === 'web' && !browserApplied) {
-              console.log('Applying MarkoRspackBrowserPlugin for web target');
-              config.plugins.push({
-                name: 'MarkoRspackBrowserPlugin',
-                // @ts-ignore
-                apply(compiler) {
-                  markoRspackPlugin.browserApply(compiler);
-                },
-              });
-              browserApplied = true;
-            }
-          }
+          applyServerPlugin();
+          applyBrowserPlugin();
         }
 
         return config;
       });
+
       console.log('Marko plugin initialized.');
     },
   };
