@@ -1,13 +1,4 @@
-class {
-    onCreate() {
-        this.state = {
-            count: 0
-        };
-    }
-    increment() {
-        this.state.count++;
-    }
-}
+<let/count=0>
 
-<div id="count">The current count is ${state.count}</div>
-<button on-click("increment") id="second">Click Me!</button>
+<div id="count">The current count is ${count}</div>
+<button onClick() { count++; } id="second">Click Me!</button>

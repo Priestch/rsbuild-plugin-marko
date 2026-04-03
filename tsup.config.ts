@@ -1,11 +1,14 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['./src/index.ts'],
+  entry: {
+    index: './src/index.ts',
+    'marko-loader': './tools/marko-loader.ts',
+  },
   format: ['esm', 'cjs'],
   target: 'node18',
   dts: true,
   clean: true,
   shims: true,
-  external: ['@marko/webpack/loader', '@rspack/core']
+  external: ['@rspack/core', '@marko/compiler'],
 });

@@ -1,8 +1,7 @@
-import { RsbuildPluginAPI} from '@rsbuild/core';
+import type { RsbuildPluginAPI } from '@rsbuild/core';
 import MarkoRspackPlugin, {
   type MarkoPluginOptions,
 } from '../tools/MarkoRspackPlugin';
-
 
 const PLUGIN_MARKO_NAME = 'rsbuild:marko';
 const pluginMarko = (options: MarkoPluginOptions = {}) => {
@@ -14,36 +13,36 @@ const pluginMarko = (options: MarkoPluginOptions = {}) => {
       markoRspackPlugin.setup(api);
 
       // let pluginLoaded = false;
-      let serverApplied = false;
+      const serverApplied = false;
       let browserApplied = false;
 
       api.modifyRspackConfig((config, { target }) => {
-          config.plugins = config.plugins || [];
+        config.plugins = config.plugins || [];
 
-          const targets = ['node', 'web'];
+        const targets = ['node', 'web'];
 
         if (target) {
           // If a specific target is set
           if (target === 'node' && !serverApplied) {
             console.log('Applying MarkoRspackServerPlugin for node target');
             // @ts-ignore
-              config.plugins.push({
-                name: 'MarkoRspackServerPlugin',
-                // @ts-ignore
-                apply(compiler) {
-                  markoRspackPlugin.serverApply(compiler);
-                },
-              });
+            config.plugins.push({
+              name: 'MarkoRspackServerPlugin',
+              // @ts-ignore
+              apply(compiler) {
+                markoRspackPlugin.serverApply(compiler);
+              },
+            });
           } else if (target === 'web' && !browserApplied) {
             console.log('Applying MarkoRspackBrowserPlugin for web target');
             // @ts-ignore
-              config.plugins.push({
-                name: 'MarkoRspackBrowserPlugin',
-                // @ts-ignore
-                apply(compiler) {
-                  markoRspackPlugin.browserApply(compiler);
-                },
-              });
+            config.plugins.push({
+              name: 'MarkoRspackBrowserPlugin',
+              // @ts-ignore
+              apply(compiler) {
+                markoRspackPlugin.browserApply(compiler);
+              },
+            });
             browserApplied = true;
           }
         } else {

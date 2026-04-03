@@ -1,2 +1,4 @@
 packages:
   - 'playground'
+  - 'my-app'
+  - 'my-app1'

@@ -1,25 +1,15 @@
+// Client-side rendering with Marko v6 DOM output
 import example from './templates/example.marko';
 
-//One way to use js to render marko pages for client side.
-// async function renderExample() {
-//     try{
-//         const result = await example.render({ label: 'Click me!' });
-//         result.appendTo(document.body);
-//     } catch (err) {
-//         console.log('Didn\'t work...\n', err);
-//     }
-// }
-// renderExample();
+async function render() {
+  // The DOM output exports a template with mount method
+  const template = example.default || example;
 
+  // Use mount to attach to document body
+  // The template has a .mount(input, reference, position) method
+  const result = template.mount({}, document.body);
 
-//Another way to render .marko using js as shown on the markojs website for client side.
-const html = example.renderToString({});
-console.log(html);
+  return result;
+}
 
-var resultPromise = example.render({});
-
-resultPromise.then((result) => {
-    result.appendTo(document.body);
-});
-
-
+render().catch(console.error);

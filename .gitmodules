@@ -1,0 +1,3 @@
+[submodule "marko"]
+	path = marko
+	url = https://github.com/marko-js/marko
